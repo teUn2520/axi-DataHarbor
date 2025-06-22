@@ -54,7 +54,7 @@ public class B2ExportService {
                     String savePath = "records/" + fileName;
 
                     byte[] content;
-                    content = objectMapper.writeValueAsString(jsonData).getBytes(StandardCharsets.UTF_8);
+                    content = objectMapper.writeValueAsBytes(jsonData);
 
                     uploadToS3(savePath, content);
 
@@ -84,14 +84,17 @@ public class B2ExportService {
         }
     }
 
-    public JsonNode readJsonAsNode(String key) throws IOException {
+    public String readJsonAsNode(String key) throws IOException {
         try (ResponseInputStream<GetObjectResponse> s3Response = s3Client.getObject(
                 GetObjectRequest.builder()
                         .bucket("axi-bucket")
                         .key("records/" + key)
                         .build())) {
 
-            return objectMapper.readTree(s3Response);
+            JsonNode jsonNode = objectMapper.readTree(s3Response);
+            String jsonData = objectMapper.writeValueAsString(jsonNode);
+
+            return jsonData;
         }
     }
 
@@ -100,8 +103,8 @@ public class B2ExportService {
                 PutObjectRequest.builder()
                         .bucket("axi-bucket")
                         .key(key)
-                        .contentType("application/json; charset=utf-8")
-                        .contentEncoding("utf-8")
+                        .contentType("application/json; charset=UTF-8")
+                        .contentEncoding("UTF-8")
                         .build(),
                 RequestBody.fromBytes(fileBytes)
             );

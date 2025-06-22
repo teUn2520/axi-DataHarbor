@@ -13,6 +13,5 @@ public interface ParsingService {
     List<Request> findAllRequests ();
     String saveRequest (String xmlRequest);
     Page<Request> advancedFilterRequest(FilterRequest filterRequest, Pageable pageable);
-    boolean areAllFiltersEmpty(FilterRequest filterRequest);
     String editDbAfterMigration (ExternalResponse[] assignments);
 }

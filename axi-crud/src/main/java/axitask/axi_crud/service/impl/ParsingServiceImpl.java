@@ -90,19 +90,15 @@ public class ParsingServiceImpl implements ParsingService {
 
     @Override
     public Page<Request> advancedFilterRequest(FilterRequest filterRequest, Pageable pageable) {
-        if (areAllFiltersEmpty(filterRequest)) {
-            return parsingRepository.findAll(pageable);
-        }
-        return parsingRepository.findByAdvancedFilters(filterRequest, pageable);
-    }
+        RestTemplate restTemplate = new RestTemplate();
+        Page<Request> request;
 
-    @Override
-    public boolean areAllFiltersEmpty(FilterRequest filterRequest) {
-        return filterRequest.getRequestDateFrom() == null &&
-                filterRequest.getRequestDateTo() == null &&
-                filterRequest.getMinProcessingTimeMs() == null &&
-                filterRequest.getMaxXmlTags() == null &&
-                filterRequest.getMinJsonKeys() == null;
+        if (areAllFiltersEmpty(filterRequest)) {
+            request = parsingRepository.findAll(pageable);
+            return apiResponseEnrichment(request);
+        }
+        request = parsingRepository.findByAdvancedFilters(filterRequest, pageable);
+        return apiResponseEnrichment(request);
     }
 
     @Override
@@ -140,7 +136,7 @@ public class ParsingServiceImpl implements ParsingService {
             return "Не найдено соответствующих записей в базе для обновления.";
 
         } catch (NumberFormatException e) {
-            throw new RuntimeException("Некорректный формат ID", e);
+            throw new RuntimeException("Некорректный формат ID ", e);
         } catch (Exception e) {
             throw new RuntimeException("Ошибка при обработке данных: " + e.getMessage(), e);
         }
@@ -188,6 +184,46 @@ public class ParsingServiceImpl implements ParsingService {
                 throw new RuntimeException("Не удалось конвертировать данные в JSON.", e);
             }
         }
+    }
+
+    private Page<Request> apiResponseEnrichment(Page<Request> request) {
+        RestTemplate restTemplate = new RestTemplate();
+
+        request.getContent().forEach(req -> {
+            if (req.getJsonData() == null && req.getExternalId() != null) {
+                String externalId = req.getExternalId();
+                String jsonData = restTemplate.getForObject(
+                        "http://localhost:8081/api/export/get/" + externalId,
+                        String.class
+                );
+
+                String normalizedJson = parseJsonString(jsonData);
+                req.setJsonData(normalizedJson);
+            }
+        });
+
+        return request;
+    }
+
+    private String parseJsonString(String jsonData) {
+        String normalizedJson = jsonData
+                .replace("\\\"", "\"")  // Заменяем \" на "
+                .replaceAll("^\"|\"$", "");
+
+        if (normalizedJson.startsWith("\"") && normalizedJson.endsWith("\"")) {
+            normalizedJson = normalizedJson.substring(1, normalizedJson.length() - 1);
+        }
+
+        return normalizedJson;
+    }
+
+    private boolean areAllFiltersEmpty(FilterRequest filterRequest) {
+        return filterRequest.getRequestDateFrom() == null &&
+                filterRequest.getRequestDateTo() == null &&
+                filterRequest.getMinProcessingTimeMs() == null &&
+                filterRequest.getMaxXmlTags() == null &&
+                filterRequest.getMinJsonKeys() == null &&
+                filterRequest.getCheckExternalId() == null;
     }
 
     private static int keysCounter(JsonNode node) {

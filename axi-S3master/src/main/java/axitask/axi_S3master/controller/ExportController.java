@@ -21,7 +21,7 @@ public class ExportController {
     }
 
     @GetMapping("get/{key}")
-    public JsonNode getS3Content(@PathVariable String key) {
+    public String getS3Content(@PathVariable String key) {
         try {
             return exportService.readJsonAsNode(key);
         } catch (IOException e) {

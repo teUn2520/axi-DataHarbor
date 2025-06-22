@@ -37,7 +37,7 @@ public interface ParsingRepository extends JpaRepository<Request, Long>, JpaSpec
                 predicates.add(cb.greaterThanOrEqualTo(root.get("jsonKeys"), filters.getMinJsonKeys()));
             }
 
-            if(filters.getCheckExternalId()) {
+            if(filters.getCheckExternalId() != null) {
                 predicates.add(cb.isNull(root.get("externalId")));
             }
 
