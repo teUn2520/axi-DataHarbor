@@ -1,14 +1,14 @@
-package axitask.axi_S3master.service;
+package axitask.axi_crud.service.impl;
 
+import axitask.axi_crud.DTO.ExternalResponse;
+import axitask.axi_crud.service.S3ExportService;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.*;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -24,12 +24,12 @@ import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
-public class B2ExportService {
-    private final RestTemplate restTemplate;
+public class S3ExportServiceImpl implements S3ExportService {
     private final S3Client s3Client;
     private final ObjectMapper objectMapper;
 
-    public ArrayNode fetchAndUploadToS3(String requestBody) {
+    @Override
+    public ExternalResponse[] fetchAndUploadToS3(String requestBody) {
         try {
             byte[] requestBytes = requestBody.getBytes(StandardCharsets.ISO_8859_1);
             String normalizedBody = new String(requestBytes, StandardCharsets.UTF_8);
@@ -68,14 +68,11 @@ public class B2ExportService {
             }
 
             if (!answers.isEmpty()) {
-                ResponseEntity<ArrayNode> response = restTemplate.postForEntity(
-                        "http://localhost:8080/api/v1/update-db",
-                        answers,
-                        ArrayNode.class
-                );
+                return objectMapper
+                        .treeToValue(answers, ExternalResponse[].class);
             }
 
-            return objectMapper.createArrayNode();
+            return new ExternalResponse[0];
 
         } catch (JsonProcessingException e) {
             throw new RuntimeException("Ошибка в ходе обработки JSON.", e);
@@ -84,6 +81,7 @@ public class B2ExportService {
         }
     }
 
+    @Override
     public String readJsonAsNode(String key) throws IOException {
         try (ResponseInputStream<GetObjectResponse> s3Response = s3Client.getObject(
                 GetObjectRequest.builder()
@@ -107,7 +105,7 @@ public class B2ExportService {
                         .contentEncoding("UTF-8")
                         .build(),
                 RequestBody.fromBytes(fileBytes)
-            );
+        );
     }
 
     private String generateId() {

@@ -1,6 +1,14 @@
 spring:
   application:
     name: axi-crud
+  cloud:
+    aws:
+      s3:
+        endpoint: http://localhost:9000
+        region: us-east-1
+        credentials:
+          access-key: minioadmin
+          secret-key: minioadmin
 
   datasource:
     url: jdbc:mysql://localhost:3306/axidb

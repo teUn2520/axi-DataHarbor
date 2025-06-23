@@ -5,8 +5,8 @@ import axitask.axi_crud.DTO.FilterRequest;
 import axitask.axi_crud.model.Request;
 import axitask.axi_crud.repository.ParsingRepository;
 import axitask.axi_crud.service.ParsingService;
+import axitask.axi_crud.service.S3ExportService;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import lombok.AllArgsConstructor;
 import org.springframework.context.annotation.Primary;
 import org.springframework.data.domain.Page;
@@ -22,6 +22,7 @@ import org.springframework.web.client.RestTemplate;
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamReader;
+import java.io.IOException;
 import java.io.StringReader;
 import java.time.Duration;
 import java.time.Instant;
@@ -35,17 +36,13 @@ import java.util.stream.Collectors;
 @Primary
 public class ParsingServiceImpl implements ParsingService {
     private final ParsingRepository parsingRepository;
-
-    @Override
-    public List<Request> findAllRequests() {
-        return parsingRepository.findAll();
-    }
+    private final S3ExportService s3ExportService;
+    private final ObjectMapper objectMapper;
 
     @Override
     public String saveRequest(String xmlRequest) {
         Request request = new Request();
         XmlMapper xmlMapper = new XmlMapper();
-        ObjectMapper jsonMapper = new ObjectMapper();
 
         Instant startTime;
         Instant endTime;
@@ -60,7 +57,7 @@ public class ParsingServiceImpl implements ParsingService {
             localDateTime = localDateTime.withNano(0);
 
             JsonNode node = xmlMapper.readTree(xmlRequest.getBytes());
-            String jsonString = jsonMapper.writeValueAsString(node);
+            String jsonString = objectMapper.writeValueAsString(node);
 
             jsonKeys = keysCounter(node);
             xmlTags = tagsCounter(xmlRequest);
@@ -89,8 +86,12 @@ public class ParsingServiceImpl implements ParsingService {
     }
 
     @Override
+    public List<Request> findAllRequests() {
+        return parsingRepository.findAll();
+    }
+
+    @Override
     public Page<Request> advancedFilterRequest(FilterRequest filterRequest, Pageable pageable) {
-        RestTemplate restTemplate = new RestTemplate();
         Page<Request> request;
 
         if (areAllFiltersEmpty(filterRequest)) {
@@ -143,14 +144,10 @@ public class ParsingServiceImpl implements ParsingService {
     }
 
     @Scheduled(fixedRate = 30000)
-    private void checkExternalId() {
+    private String checkExternalId() {
         int page = 0;
         int size = 100;
         boolean hasMore = true;
-
-        RestTemplate restTemplate = new RestTemplate();
-        ObjectMapper objectMapper = new ObjectMapper();
-        objectMapper.registerModule(new JavaTimeModule());
 
         FilterRequest filterRequest = FilterRequest.builder()
                 .checkExternalId(true)
@@ -167,35 +164,32 @@ public class ParsingServiceImpl implements ParsingService {
 
             try {
                 String jsonData = objectMapper.writeValueAsString(dataPage.getContent());
-
-                restTemplate.postForObject(
-                        "http://localhost:8081/api/export/run",
-                        jsonData,
-                        String.class
-                );
-
+                ExternalResponse[] externalIds = s3ExportService.fetchAndUploadToS3(jsonData);
                 if (dataPage.isLast()) {
                     hasMore = false;
                 } else {
                     page++;
                 }
-
+                return editDbAfterMigration(externalIds);
             } catch (JsonProcessingException e) {
                 throw new RuntimeException("Не удалось конвертировать данные в JSON.", e);
             }
         }
+
+        return "Нет полей для миграции.";
     }
 
     private Page<Request> apiResponseEnrichment(Page<Request> request) {
-        RestTemplate restTemplate = new RestTemplate();
 
         request.getContent().forEach(req -> {
             if (req.getJsonData() == null && req.getExternalId() != null) {
                 String externalId = req.getExternalId();
-                String jsonData = restTemplate.getForObject(
-                        "http://localhost:8081/api/export/get/" + externalId,
-                        String.class
-                );
+                String jsonData = null;
+                try {
+                    jsonData = s3ExportService.readJsonAsNode(externalId);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
 
                 String normalizedJson = parseJsonString(jsonData);
                 req.setJsonData(normalizedJson);

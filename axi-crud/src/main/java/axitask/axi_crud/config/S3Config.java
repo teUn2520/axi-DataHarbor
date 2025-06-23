@@ -1,4 +1,4 @@
-package axitask.axi_S3master.config;
+package axitask.axi_crud.config;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
