@@ -1,6 +1,5 @@
 package axitask.axi_crud.service.impl;
 
-import axitask.axi_crud.DTO.ExternalResponse;
 import axitask.axi_crud.DTO.FilterRequest;
 import axitask.axi_crud.model.Request;
 import axitask.axi_crud.repository.ParsingRepository;
@@ -17,7 +16,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.xml.XmlMapper;
 import org.springframework.data.domain.Pageable;
-import org.springframework.web.client.RestTemplate;
 
 import javax.xml.stream.XMLInputFactory;
 import javax.xml.stream.XMLStreamConstants;
@@ -28,7 +26,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.*;
-import java.util.stream.Collectors;
 
 
 @Service
@@ -86,11 +83,6 @@ public class ParsingServiceImpl implements ParsingService {
     }
 
     @Override
-    public List<Request> findAllRequests() {
-        return parsingRepository.findAll();
-    }
-
-    @Override
     public Page<Request> advancedFilterRequest(FilterRequest filterRequest, Pageable pageable) {
         Page<Request> request;
 
@@ -103,48 +95,34 @@ public class ParsingServiceImpl implements ParsingService {
     }
 
     @Override
-    public String editDbAfterMigration(ExternalResponse[] request) {
-        if (request == null || request.length == 0) {
-            return "Нет данных для обновления.";
+    public String editDbAfterMigration(Long id, String externalId) {
+        if (id == null || externalId == null || externalId.isEmpty()) {
+            return "Неверные параметры для обновления (ID или externalId отсутствуют)";
         }
-        List<ExternalResponse> assignments = Arrays.asList(request);
 
         try {
-            Map<Long, String> idToExternal = assignments.stream()
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toMap(
-                            resp -> Long.parseLong(resp.getId()),
-                            ExternalResponse::getExternalId,
-                            (existing, replacement) -> existing
-                    ));
+            Optional<Request> optionalRequest = parsingRepository.findById(id);
 
-            Set<Long> idsToUpdate = idToExternal.keySet();
+            if (optionalRequest.isPresent()) {
+                Request request = optionalRequest.get();
+                request.setExternalId(externalId);
+                request.setJsonData(null);
 
-            List<Request> existingRequests = parsingRepository.findAllById(idsToUpdate);
-
-            List<Request> requestsToUpdate = existingRequests.stream()
-                    .filter(req -> idToExternal.containsKey(req.getId()))
-                    .peek(req -> {
-                        req.setExternalId(idToExternal.get(req.getId()));
-                        req.setJsonData(null);
-                    })
-                    .collect(Collectors.toList());
-
-            if (!requestsToUpdate.isEmpty()) {
-                parsingRepository.saveAll(requestsToUpdate);
-                return String.format("Успешно обновлено %d записей.", requestsToUpdate.size());
+                parsingRepository.save(request);
+                return String.format("Запись ID: %s успешно обновлена с externalId: %s", id, externalId);
             }
-            return "Не найдено соответствующих записей в базе для обновления.";
+
+            return String.format("Запись с ID: %s не найдена в базе данных", id);
 
         } catch (NumberFormatException e) {
-            throw new RuntimeException("Некорректный формат ID ", e);
+            throw new RuntimeException("Некорректный формат ID: " + id, e);
         } catch (Exception e) {
-            throw new RuntimeException("Ошибка при обработке данных: " + e.getMessage(), e);
+            throw new RuntimeException("Ошибка при обновлении записи ID: " + id, e);
         }
     }
 
     @Scheduled(fixedRate = 30000)
-    private String checkExternalId() {
+    private String checkExternalIdAndThrowToS3() {
         int page = 0;
         int size = 100;
         boolean hasMore = true;
@@ -162,21 +140,42 @@ public class ParsingServiceImpl implements ParsingService {
                 continue;
             }
 
-            try {
-                String jsonData = objectMapper.writeValueAsString(dataPage.getContent());
-                ExternalResponse[] externalIds = s3ExportService.fetchAndUploadToS3(jsonData);
-                if (dataPage.isLast()) {
-                    hasMore = false;
-                } else {
-                    page++;
+            for (Request request : dataPage.getContent()) {
+                try {
+                    if (request.getExternalId() != null && !request.getExternalId().isEmpty()) {
+                        continue;
+                    }
+
+                    String data = request.getJsonData();
+                    String id = request.getId().toString();
+
+                    byte[] content = objectMapper.writeValueAsBytes(data);
+
+                    String externalId = s3ExportService.buildAndUploadToS3(id, content);
+                    Long requestId = request.getId();
+
+                    editDbAfterMigration(requestId, externalId);
+
+                } catch (JsonProcessingException e) {
+                    throw new axitask.axi_crud.exceptions.JsonProcessingException(
+                            "JSON_CONVERSION_ERROR",
+                            "Не удалось конвертировать данные в JSON." + e.getOriginalMessage(),
+                            e
+                    );
+
+                } catch (Exception e) {
+                    throw new RuntimeException("Ошибка при обработке записи ID: " + request.getId(), e);
                 }
-                return editDbAfterMigration(externalIds);
-            } catch (JsonProcessingException e) {
-                throw new RuntimeException("Не удалось конвертировать данные в JSON.", e);
+            }
+
+            if (dataPage.isLast()) {
+                hasMore = false;
+            } else {
+                page++;
             }
         }
 
-        return "Нет полей для миграции.";
+        return "Миграция завершена";
     }
 
     private Page<Request> apiResponseEnrichment(Page<Request> request) {
@@ -188,7 +187,11 @@ public class ParsingServiceImpl implements ParsingService {
                 try {
                     jsonData = s3ExportService.readJsonAsNode(externalId);
                 } catch (IOException e) {
-                    throw new RuntimeException(e);
+                    throw new axitask.axi_crud.exceptions.JsonProcessingException(
+                            "JSON_CONVERSION_ERROR",
+                            "Не удалось конвертировать данные в JSON." + e,
+                            e
+                    );
                 }
 
                 String normalizedJson = parseJsonString(jsonData);

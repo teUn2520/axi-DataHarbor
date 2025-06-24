@@ -1,26 +1,16 @@
 package axitask.axi_crud.service.impl;
 
-import axitask.axi_crud.DTO.ExternalResponse;
 import axitask.axi_crud.service.S3ExportService;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.core.ResponseInputStream;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.GetObjectRequest;
-import software.amazon.awssdk.services.s3.model.GetObjectResponse;
-import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.*;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
@@ -29,55 +19,19 @@ public class S3ExportServiceImpl implements S3ExportService {
     private final ObjectMapper objectMapper;
 
     @Override
-    public ExternalResponse[] fetchAndUploadToS3(String requestBody) {
+    public String buildAndUploadToS3(String id, byte[] content) {
         try {
-            byte[] requestBytes = requestBody.getBytes(StandardCharsets.ISO_8859_1);
-            String normalizedBody = new String(requestBytes, StandardCharsets.UTF_8);
+            String fileName = "record_" + id;
+            String savePath = "records/" + fileName;
 
-            List<Map<String, Object>> requests = objectMapper.readValue(
-                    normalizedBody,
-                    new TypeReference<List<Map<String, Object>>>() {}
-            );
-
-            ArrayNode answers = objectMapper.createArrayNode();
-
-            for (Map<String, Object> request : requests) {
-                try {
-                    Object jsonData = request.get("jsonData");
-                    if (jsonData == null) {
-                        throw new RuntimeException("Пустое значение 'jsonData'.");
-                    }
-
-                    String id = objectMapper.convertValue(request.get("id"), String.class);
-
-                    String fileName = generateId();
-                    String savePath = "records/" + fileName;
-
-                    byte[] content;
-                    content = objectMapper.writeValueAsBytes(jsonData);
-
-                    uploadToS3(savePath, content);
-
-                    answers.add(objectMapper.createObjectNode()
-                            .put("id", id)
-                            .put("externalId", fileName));
-
-                } catch (Exception e) {
-                    throw new RuntimeException("Ошибка в ходе обработки значения.", e);
-                }
+            if (doesRecordExist(savePath)) {
+                return fileName;
             }
 
-            if (!answers.isEmpty()) {
-                return objectMapper
-                        .treeToValue(answers, ExternalResponse[].class);
-            }
-
-            return new ExternalResponse[0];
-
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException("Ошибка в ходе обработки JSON.", e);
+            uploadToS3(savePath, content);
+            return fileName;
         } catch (Exception e) {
-            throw new RuntimeException("Неизвестная ошибка.", e);
+            throw new RuntimeException("Ошибка при загрузке данных в S3", e);
         }
     }
 
@@ -96,6 +50,25 @@ public class S3ExportServiceImpl implements S3ExportService {
         }
     }
 
+    private boolean doesRecordExist(String key) {
+        try {
+            HeadObjectRequest headObjectRequest = HeadObjectRequest.builder()
+                    .bucket("axi-bucket")
+                    .key(key)
+                    .build();
+
+            HeadObjectResponse response = s3Client.headObject(headObjectRequest);
+
+            return true;
+
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
+                return false;
+            }
+            throw new RuntimeException("Ошибка при проверке существования объекта в S3", e);
+        }
+    }
+
     private void uploadToS3(String key, byte[] fileBytes) {
         s3Client.putObject(
                 PutObjectRequest.builder()
@@ -106,9 +79,5 @@ public class S3ExportServiceImpl implements S3ExportService {
                         .build(),
                 RequestBody.fromBytes(fileBytes)
         );
-    }
-
-    private String generateId() {
-        return UUID.randomUUID().toString().substring(0, 8);
     }
 }

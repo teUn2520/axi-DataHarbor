@@ -5,6 +5,6 @@ import axitask.axi_crud.DTO.ExternalResponse;
 import java.io.IOException;
 
 public interface S3ExportService {
-    public ExternalResponse[] fetchAndUploadToS3(String requestBody);
+    public String buildAndUploadToS3(String id, byte[] content);
     public String readJsonAsNode(String key) throws IOException;
 }

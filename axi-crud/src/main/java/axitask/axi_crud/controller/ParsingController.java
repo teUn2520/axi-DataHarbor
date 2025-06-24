@@ -30,9 +30,4 @@ public class ParsingController {
 
         return parsingService.advancedFilterRequest(filterRequest, pageable);
     }
-
-    @PostMapping("update-db")
-    public String updateDataBase(@RequestBody ExternalResponse[] responses) {
-        return parsingService.editDbAfterMigration(responses);
-    }
 }
