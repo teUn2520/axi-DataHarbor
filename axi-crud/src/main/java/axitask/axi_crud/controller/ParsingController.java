@@ -1,6 +1,5 @@
 package axitask.axi_crud.controller;
 
-import axitask.axi_crud.DTO.ExternalResponse;
 import axitask.axi_crud.DTO.FilterRequest;
 import axitask.axi_crud.model.Request;
 import axitask.axi_crud.service.ParsingService;
