@@ -1,0 +1,27 @@
+spring:
+  application:
+    name: axi-crud
+  cloud:
+    aws:
+      s3:
+        endpoint: http://localhost:9000
+        region: us-east-1
+        credentials:
+          access-key: minioadmin
+          secret-key: minioadmin
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/axidb
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: root
+    password: "1234"
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    database: mysql
+    database-platform: org.hibernate.dialect.MySQLDialect
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
